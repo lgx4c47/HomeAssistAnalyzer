@@ -27,4 +27,8 @@ PDF-Dokument mit Diagrammen ausgegeben.
 ├── alte rawdaten/
 ├── analyzed/
 ├── diagramme/
-└── auswertung/
+└── auswertung
+
+## Einschränkungen: 
+
+Funktioniert nur mit Messdaten auf Deutsch und Sensorwerten. 
