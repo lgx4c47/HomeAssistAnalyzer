@@ -1,7 +1,7 @@
 # Wohnungsklima-Auswertung
 
 Kleines Python-Tool zur Auswertung und grafischen Darstellung von
-Temperatur- und Luftfeuchtigkeitsmessungen.
+Temperatur- und Luftfeuchtigkeitsmessungen aus HomeAssistant.
 
 Die Messdaten werden eingelesen, nach Kalenderwochen aufbereitet und als
 PDF-Dokument mit Diagrammen ausgegeben.
