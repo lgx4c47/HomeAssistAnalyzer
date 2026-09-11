@@ -1,6 +1,9 @@
-import csv
 import glob
-from datetime import date
+import drawer_lite
+from datetime import datetime, timedelta
+
+MIETE = 764.67
+TEMPERATUR_SCHWELLWERT = 20
 
 '''Aufrufen anschließend öffnen aus raw, einteilen in sinnvolles Format, ausrechnen der Minderungsfähigen Tage, Report zu durchgeführten Änderungen erstellen'''
 
@@ -9,167 +12,152 @@ def load_call():
     for datei in glob.glob('./raw/*'):
         #try:
             analyze(datei)
-      #  except:
-          #  print(f"Analyse von \"{datei}\" nicht möglich")
+        #except:
+            #print(f"Analyse von \"{datei}\" nicht möglich")
 
 def analyze (file:str):
-    '''Erstellt Strukturierte Datendarstellung in Dictionary (Beispiel): {"sensor1":{[{"temperatur"="11.0", "zeit"="2026-07-01 05:15:59"}, 
-        {"temperatur"="12.0", "zeit"="2026-07-03 05:15:59"},...], "sensor2":[{...}]}
+    '''Erstellt Strukturierte Datendarstellung in Dictionary (Beispiel): {"sensor1":{"messwert":[MESSWERTE], "zeit":[ZEITEN]}, "sensor2":{...},...}
         
         Bei mehreren Sensoren werden diese also separat gespeichert (eigene Zeiterfassung).'''
-    sorted_data_temp={}
-    sorted_data_feuchtigkeit={}
+    sorted_data={"temperatur":{}, "luftfeuchtigkeit":{}}
     report = f"Datei {file} wird analysiert"
     sensorcount = 0
+    starttag = datetime.strptime("2150-06-06", "%Y-%m-%d").date()
+
     with open(file) as rawfile: 
         linecount = 0
         useless_lines = []
         for line in rawfile:
             arr = line.split(",")
-            kind = ""
+            # prüfen ob temperatur oder feuchtigkeit
             try:
                 kind = arr[0].split('_')[arr[0].count('_')]
             except:
                 useless_lines.append(linecount)
+                kind = ""
                 continue
-            datetime =  arr[2].replace("T", " ").replace("Z\n", "")
-            if kind == "temperatur":
+            # Datumsformat anpassen
+            zeit =  arr[2].replace("T", " ").replace("Z\n", "")
+            if kind == "temperatur" or kind == "luftfeuchtigkeit":
                 try:
-                    if arr[0] in sorted_data_temp:
-                        sorted_data_temp[arr[0]].append({"messwert":arr[1], "zeit":datetime})  
+                    # Sensor bereits im Datensatz?
+                    if arr[0] in sorted_data[kind]:
+                        sorted_data[kind][arr[0]]["messwert"].append(arr[1])
+                        sorted_data[kind][arr[0]]["zeit"].append(zeit)   
                     else: 
-                        sorted_data_temp[arr[0]]=[{"messwert":arr[1], "zeit":datetime}]
+                        sorted_data[kind][arr[0]] = {"messwert":[arr[1]], "zeit":[zeit]}
                         sensorcount += 1
-                except: 
-                    report += f"\n Error in Zeile {linecount}"
-            elif kind == "luftfeuchtigkeit":
-                try:
-                    if arr[0] in sorted_data_feuchtigkeit:
-                        sorted_data_feuchtigkeit[arr[0]].append({"messwert":arr[1], "zeit":datetime})   
-                    else: sorted_data_feuchtigkeit[arr[0]]=[{"messwert":arr[1], "zeit":datetime}]
+                        starttag = erster(datetime.strptime(zeit[:10], "%Y-%m-%d").date(), starttag)
                 except: 
                     report += f"\n Error in Zeile {linecount}"
             else: 
+                # unverwertbare Zeilen speichern
                 useless_lines.append(linecount)
             linecount += 1
-    sorted_data_feuchtigkeit["sensorzahl"] = sensorcount
-    sorted_data_temperatur["sensorzahl"] = sensorcount
-    report += f"\n\n Alle {linecount} Zeilen analysiert und in sorted_data_temp eingefügt. {len(useless_lines)} enthielten keine verwertbaren Daten (z.B. Überschriften/ Batteriestatus)\nDatei {file} abgeschlossen\n\nZeilen ohne verwertbare Information: {useless_lines}"
-    secure_filename = file.replace("/", "").replace("\\", "").replace(".", "")
-    unify_data(sorted_data_temp)
-    unify_data(sorted_data_feuchtigkeit)
-    #to_csv(sorted_data_temp, f"./analyzed/sorted_data_temperatur_{secure_filename}.csv")
-    #to_csv(sorted_data_feuchtigkeit, f"./analyzed/sorted_data_feuchtigkeit_{secure_filename}.csv")
-    print(teile_wochen_tage(sorted_data_temp))
-    #make_report(report, secure_filename)
+    
+    report += f"\n\n Alle {linecount} Zeilen analysiert und in sorted_data_temp eingefügt. {len(useless_lines)} enthielten keine verwertbaren Daten (z.B. Überschriften/ Batteriestatus)\nDatei {file} abgeschlossen\n\nZeilen ohne verwertbare Information: {useless_lines}\n\n"
 
-def unify_data(data:dict):
-    '''Rechnet durchschnitt in 1-Min-Blöcken und Teilt sensoren gemeinsame Zeitleiste zu'''
-    unified_data = {}
-    count = 0
-    for sensor in data:
-        for messwert in sensor:
-            if messwert["zeit"][:16] in unified_data:
-                unified_data[messwert["zeit"][:16]][count].append(messwert["messwert"])
-            else: 
-                unified_data[messwert["zeit"][:16]] = [""] * data["sensorzahl"]
-                unified_data[messwert["zeit"][:16]][count] = [messwert["messwert"]]
-        '''Werte normalisieren'''
-        for arr in unified_data:
-            if arr[count] == "":
-                continue
-            else:
-                arr[count] = avg_array(arr[count])
-        count += 1
-
-def avg_array(arr):
-    '''Durchschnitt aus array'''
-    sum = 0
-    try:
-        for i in arr:
-            sum += float(i)
-        return sum/len(arr)
-    except:
-        return ""
+    sorted_data["meta"] = {
+            "sensorzahl":sensorcount // 2, 
+            "starttag":starttag,
+            "dateiname":file.replace("/", "").replace("\\", "").replace(".", "-").replace(" ", "_"),
+            "report":report,
+            }
+    sorted_data["meta"]["auswertung"] = auswertung(sorted_data)
+    sorted_data = teile_wochen(sorted_data)
+    drawer_lite.erstelle_wochenauswertung(sorted_data, f"./auswertung/Auswertung_{sorted_data["meta"]["dateiname"]}.pdf")
         
 
-def teile_wochen_tage(data:dict):
-    '''teilt in Wochen und Tage ein'''
-    woche_tag={}
-    sensorcount = 0
-    for sensor in data:
-        sensorcount += 1
+def teile_wochen(data:dict):
+    '''teilt in Wochen ein'''
+    startwoche = 1
+    weekwise={"luftfeuchtigkeit":{startwoche:{}}, "temperatur":{startwoche:{}}}
+    starttag = data["meta"]["starttag"]
+    # iter über einzelne sensoren
+    kinds = ["luftfeuchtigkeit", "temperatur"]
+    for kind in kinds: 
         woche = 1
-        wochencounter = 0
-        woche_tag_sensor={1:{}}
-        for messwert in data[sensor]:
-            if messwert["datum"] in woche_tag_sensor[woche]:
-                woche_tag_sensor[woche][messwert["datum"]].append({messwert["zeit"]:messwert["messwert"]})
-            else:
-                if wochencounter ==7:
-                    woche += 1
-                    wochencounter = 0
-                    woche_tag_sensor[woche] = {}
-                woche_tag_sensor[woche][messwert["datum"]] = [{messwert["zeit"]:messwert["messwert"]}]
-                wochencounter += 1
-        for woche in woche_tag_sensor:
-            if woche not in woche_tag:
-                    woche_tag[woche] = {}
-            for tag in woche_tag_sensor[woche]:
-                if tag in woche_tag[woche]:
-                    woche_tag[woche][tag][sensor] = woche_tag_sensor[woche][tag]
+        for sensor in data[kind]:
+            for i in range(len(data[kind][sensor]["messwert"])):
+                if (datetime.strptime(data[kind][sensor]["zeit"][i][:10].strip(), "%Y-%m-%d").date() - starttag).days <= 7:
+                    if sensor not in weekwise[kind][woche]: weekwise[kind][woche][sensor] = {"messwert":[], "zeit":[]}
+                    weekwise[kind][woche][sensor]["messwert"].append(data[kind][sensor]["messwert"][i])
+                    weekwise[kind][woche][sensor]["zeit"].append(data[kind][sensor]["zeit"][i])
                 else:
-                    woche_tag[woche] = {tag:{sensor:woche_tag_sensor[woche][tag]}}
-    woche_tag["sensorzahl"] = sensorcount
-    return woche_tag
+                    wochen = (datetime.strptime(data[kind][sensor]["zeit"][i][:10].strip(), "%Y-%m-%d").date() - starttag).days // 7
+                    woche += wochen
+                    starttag += timedelta(weeks=wochen)
+                    if woche in weekwise[kind]: 
+                        weekwise[kind][woche][sensor] = {"messwert":data[kind][sensor]["messwert"],"zeit":data[kind][sensor]["zeit"]}
+                    else: 
+                        weekwise[kind][woche] = {sensor: {"messwert":[data[kind][sensor]["messwert"][i]],"zeit":[data[kind][sensor]["zeit"][i]]}}
+    weekwise["meta"] = data["meta"]
+    return weekwise
 
-def to_csv(data:dict, name:str):
-    '''Überführt sorted_data in CSV'''
-    lines=["", "", ""]
-    for sensor in data:
-        '''Initialisiert pro Sensor, anschließend werden jeweils die Zeilen bearbeitet (umsetzung als Array --> Flexibel)'''
-        lines[0] += f"{sensor};;;"
-        lines[1] += "Datum;Uhrzeit;Messwert;"
-        for i in range(len(data[sensor])):
-            try:
-                lines[2+i] += f"{data[sensor][i]['datum']};{data[sensor][i-1]['zeit']};{data[sensor][i-1]['messwert']};"
-            except:
-                try:
-                    lines.append(f"{data[sensor][i]['datum']};{data[sensor][i-1]['zeit']};{data[sensor][i-1]['messwert']};")
-                except:
-                    try:
-                        lines[2+i]=";;;"
-                    except:
-                        lines.append(";;;")
-    with open(name,"w", newline="", encoding="utf-8") as f:
-        for line in lines:
-            f.write(line + "\n")
 
-def to_csv_weekwise(data:dict, name:str):
-    '''Überführt wochen- und tageweise geordnete daten in CSV'''
-    lines=["", "", ""]
-    for woche in data:
-        '''Initialisiert pro Sensor, anschließend werden jeweils die Zeilen bearbeitet (umsetzung als Array --> Flexibel)'''
-        lines[0] += f"{woche}"
-        lines[2] += "Datum;Uhrzeit;Messwert;"
-        for i in range(len(data[sensor])):
-            try:
-                lines[2+i] += f"{data[sensor][i]['datum']};{data[sensor][i-1]['zeit']};{data[sensor][i-1]['messwert']};"
-            except:
-                try:
-                    lines.append(f"{data[sensor][i]['datum']};{data[sensor][i-1]['zeit']};{data[sensor][i-1]['messwert']};")
-                except:
-                    try:
-                        lines[2+i]=";;;"
-                    except:
-                        lines.append(";;;")
-    with open(name,"w", newline="", encoding="utf-8") as f:
-        for line in lines:
-            f.write(line + "\n")
+def erster(tag1, tag2):
+    '''gibt den früheren Tag zurück'''
+    if (tag1 - tag2).days < 0:
+        return tag1
+    return tag2
 
-def make_report(report: str, name: str):
-    with open(f"report_{name}.txt", "a") as f:
-        f.write(report)
+def auswertung(data):
+    auswertung = ""
+    for sensor in data["temperatur"]:
+        tage25 = []
+        tage50 = []
+        tage75 = []
+        tage100 = []
+        count_tage25 = count_tage50 = count_tage75 = count_tage100 = 0
+        tage_gesamt = 0
+        tag = data["meta"]["starttag"]
+        tagesliste = {}
+        for i in range(len(data["temperatur"][sensor]["messwert"])):
+            temp, zeit = data["temperatur"][sensor]["messwert"][i], data["temperatur"][sensor]["zeit"][i]
+            # Tag bereits erfasst?
+            if zeit[:10] == tag:
+                # Stunde bereits erfasst? (gerechnet wird hier Stundendurchschnitt)
+                if zeit[11-12] in tagesliste:
+                    tagesliste[zeit[11-12]].append(temp) 
+                else:
+                    tagesliste[zeit[11-12]] = [temp]
+            else:
+                tmp = tagesauswertung(tagesliste)
+                if tmp >= 20: 
+                    tage25.append(tag)
+                    count_tage25 += 1
+                elif tmp >= 50:
+                    tage50.append(tag)
+                    count_tage50 +=1
+                elif tmp >= 75: 
+                    tage75.append(tag)
+                    count_tage75 +=1
+                elif tmp >= 100: 
+                    tage100.append(tag)
+                    count_tage100 +=1
+                tag = zeit[:10]
+        auswertung += f"Sensor: {sensor}: \n"
+        '''auswertung += f"An insgesamt {count_tage100} wurden in 100% der aufgezeichneten Stunden durchschnittlich unter 20°C gemessen. \nBetroffene Tage: {tage100}"
+        auswertung += f"An insgesamt {count_tage75} wurden in 75% der aufgezeichneten Stunden durchschnittlich unter 20°C gemessen. \nBetroffene Tage: {tage75}"
+        auswertung += f"An insgesamt {count_tage50} wurden in 50% der aufgezeichneten Stunden durchschnittlich unter 20°C gemessen. \nBetroffene Tage: {tage50}\n\n"'''
+        auswertung += f"An insgesamt {count_tage25} Tagen wurden in 20% der aufgezeichneten Stunden durchschnittlich unter 20°C gemessen. Das entspräche {len(tage25)*MIETE/30*0.2} € Mietminderung (bei 20%)\nBetroffene Tage: {tage25}\n\n"
+    return auswertung
+
+def tagesauswertung(tagesliste):
+    'Temperaturunterschreitungen berechnen (prozent der Stundenweisen Durchschnittswerte)'
+    stundendurchschnitte = []
+    tmp = 0
+    count = 0
+    for stunde in tagesliste:
+        for temp in tagesliste[stunde]: tmp += float(temp)
+        count += 1
+        tmp = tmp / len(tagesliste[stunde])
+        stundendurchschnitte.append(tmp)
+    for stunde in stundendurchschnitte: 
+        if stunde <= TEMPERATUR_SCHWELLWERT: tmp += 100 / count
+    return tmp
+    
+
 
 if __name__=='__main__':
     load_call()

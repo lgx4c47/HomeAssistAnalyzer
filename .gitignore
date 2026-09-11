@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtuelle Umgebung
+.venv/
+venv/
+env/
+
+# Editor / Betriebssystem
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Rohdaten / persönliche Messdaten
+raw/*
+alte rawdaten/*
+analyzed/*
+diagramme/*
+
+# Erzeugte Auswertungen
+auswertung/*
+
+# Ordnerstruktur trotzdem im Repository behalten
+!raw/.gitkeep
+!alte rawdaten/.gitkeep
+!analyzed/.gitkeep
+!diagramme/.gitkeep
+!auswertung/.gitkeep
+
+# Temporäre Dateien
+*.tmp
+*.log
+*.bak
+*~
